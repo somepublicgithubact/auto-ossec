@@ -1,3 +1,6 @@
+TEMP...this fork is not maintained.  See BinaryDefense/auto-ossec.
+
+
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Binary Defense Systems Auto-Enroll for OSSEC
 Written by: David Kennedy - BDS
