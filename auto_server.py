@@ -12,6 +12,7 @@ import socketserver
 from threading import Thread
 import subprocess
 import sys
+import traceback
 
 # check python crypto library
 try:
@@ -49,38 +50,36 @@ class service(socketserver.BaseRequestHandler):
             child.sendline(hostname)
             i = child.expect(
                 ['IP Address of the new agent', 'already present'])
-
             # if we haven't already added the hostname
             if i == 0:
                 child.sendline(ipaddr)
-                i = child.expect(['for the new agent', 'Invalid IP'])
-                if i == 0:
-                    child.sendline("")
-                    for line in child:
-                        line = line.decode('utf-8')
-                        # pull id
-                        if "[" in line:
-                            id = line.replace(
-                                "[", "").replace("]", "").replace(":", "").rstrip()
-                        break
-                    child.expect("Confirm adding it?")
-                    child.sendline("y")
-                    child.sendline("")
-                    child.sendline("q")
-                    child.close()
-                    child = pexpect.spawn(
-                        "/var/ossec/bin/manage_agents -e %s" % (id))
-                    for line in child:
-                        key = line.rstrip()
+                child.expect("for the new agent")
+                child.sendline("")
+                for line in child:
+                    line = str(line, 'UTF-8')
+                    # pull id
+                    if "[" in line:
+                        id = line.replace(
+                            "[", "").replace("]", "").replace(":", "").rstrip()
+                    break
+                child.expect("Confirm adding it?")
+                child.sendline("y")
+                child.sendline("")
+                child.sendline("q")
+                child.close()
+                child = pexpect.spawn(
+                    "/var/ossec/bin/manage_agents -e %s" % (id))
+                for line in child:
+                    key = line.rstrip()
 
-                    return key
+                return key
 
             # if we have a duplicate hostname
-            if i == 1:
+            else:
                 child.close()
                 child = pexpect.spawn("/var/ossec/bin/manage_agents -l")
                 for line in child:
-                    line = line.decode('utf-8').rstrip()
+                    line = str(line, 'UTF-8').rstrip()
                     if hostname in line:
                         id = line.split(",")[0].replace(
                             "ID: ", "").replace("   ", "").rstrip()
@@ -90,32 +89,42 @@ class service(socketserver.BaseRequestHandler):
                                  (id), stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True).wait()
                 return 0
 
+        def decryptaes(cipher, data, padding):
+            result = str(cipher.decrypt(base64.b64decode(data)), 'UTF-8').rstrip(padding)
+            return result
+        def encryptaes(cipher, data, padding, blocksize):
+            # one-liner to sufficiently pad the text to be encrypted
+            pad = lambda s: s + (blocksize - len(s) % blocksize) * padding
+            data1 = str(data, 'UTF-8') #print('d1', data1)
+            data2 = pad(data1)#; print('d2', data2)
+            data3 = cipher.encrypt(data2)#; print('d3', data3, type(data3))
+            result = base64.b64encode(data3)
+            return result
+            
         # main AES encrypt and decrypt function with 32 block size padding
         def aescall(secret, data, format):
 
             # padding and block size
             PADDING = '{'
             BLOCK_SIZE = 32
-
-            # one-liner to sufficiently pad the text to be encrypted
-            pad = lambda s: s + (BLOCK_SIZE - len(s) % BLOCK_SIZE) * PADDING
-
+            
             # random value here to randomize builds
             a = 50 * 5
 
             # one-liners to encrypt/encode and decrypt/decode a string
             # encrypt with AES, encode with base64
-            EncodeAES = lambda c, s: bytes(base64.b64encode(c.encrypt(pad(s))))
-            DecodeAES = lambda c, e: c.decrypt(base64.b64decode(e)) # , 'utf-8')
+            #EncodeAES = lambda c, s: base64.b64encode(c.encrypt(pad(str(s, 'UTF-8'))))
+            #DecodeAES = lambda c, e: str(c.decrypt(
+            #    base64.b64decode(e)), 'UTF-8').rstrip(PADDING)
             cipher = AES.new(secret)
 
             if format == "encrypt":
-                aes = EncodeAES(cipher, data)
-                return str(aes)
+                #aes = EncodeAES(cipher, data)
+                aes = encryptaes(cipher, data, PADDING, BLOCK_SIZE)
+                return aes
 
             if format == "decrypt":
-                aes = DecodeAES(cipher, data)
-                aes = aes.decode('utf-8')
+                aes = decryptaes(cipher, data, PADDING)
                 return str(aes)
 
         # recommend changing this - if you do, change auto_ossec.py as well - -
@@ -149,7 +158,7 @@ class service(socketserver.BaseRequestHandler):
 
                         # strip identifier
                         data = data.replace(
-                            "BDSOSSEC*", "").replace("BDSOSSEC", "").replace("{", "")
+                            "BDSOSSEC*", "").replace("BDSOSSEC", "")
                         hostname = data
 
                         # pull the true IP, not the NATed one if they are using
@@ -157,23 +166,22 @@ class service(socketserver.BaseRequestHandler):
                         if star == 0:
                             ipaddr = self.client_address[0]
                         else:
-                            ipaddr = "*"
+                            ipaddr = "0.0.0.0/0"
 
-                        if ipaddr == "*": ipaddr = ("0.0.0.0/0")
                         # here if the hostname was already used, we need to
                         # remove it and call it again
                         data = parse_client(hostname, ipaddr)
                         if data == 0:
                             data = parse_client(hostname, ipaddr)
-
                         print("[*] Provisioned new key for hostname: %s with IP of: %s" %
-                             (hostname, ipaddr))
+                              (hostname, ipaddr))
                         data = aescall(secret, data, "encrypt")
-                        print("[*] Sending new key to %s: " % (ipaddr) + data)
-                        self.request.send(data.encode('utf-8'))
+                        print("[*] Sending new key to %s: " % (ipaddr) + str(data))
+                        self.request.send(data)
 
                 except Exception as e:
                     print(e)
+                    traceback.print_exc(file=sys.stdout)
                     pass
 
         except Exception as e:
@@ -185,6 +193,8 @@ class service(socketserver.BaseRequestHandler):
 
 # this waits 5 minutes to check if new ossec agents have been deployed, if
 # so it restarts the server
+
+
 def ossec_monitor():
     while 1:
         time.sleep(300)

@@ -19,6 +19,7 @@ import subprocess
 import time
 try: import urllib.request as urllib
 except: import urllib
+import traceback
 
 # try to import python-crypto
 try:
@@ -32,7 +33,7 @@ except ImportError as e:
 
 # check platform specific installs
 installer = ""
-if platform.system() == "Linux" or platform.system() == "Darwin":
+if platform.system() == "Linux":
     installer = "Linux"
 
 if platform.system() == "Windows":
@@ -275,13 +276,13 @@ def aescall(secret, data, format):
 
     # one-liners to encrypt/encode and decrypt/decode a string
     EncodeAES = lambda c, s: base64.b64encode(c.encrypt(pad(s)))
-    DecodeAES = lambda c, e: c.decrypt(base64.b64decode(e)).rstrip(PADDING)
+    DecodeAES = lambda c, e: str(c.decrypt(base64.b64decode(e)), 'UTF-8').rstrip(PADDING)
 
     cipher = AES.new(secret)
 
     if format == "encrypt":
         aes = EncodeAES(cipher, data)
-        return str(aes)
+        return aes
 
     if format == "decrypt":
         aes = DecodeAES(cipher, data)
@@ -331,6 +332,7 @@ try:
     data = aescall(secret, data, "encrypt")
     print (
         "[*] Pulled hostname and IP, encrypted data, and now sending to server.")
+    
     s.send(data)
     data = s.recv(size)
     # this is our ossec key
@@ -363,6 +365,7 @@ try:
             os.remove("etc/client.keys")
         filewrite = open(path + "/etc/client.keys", "w")
     data = base64.b64decode(data)
+    data = str(data, 'UTF-8')
     filewrite.write(data)
     filewrite.close()
     print ("[*] Successfully imported the new pairing key.")
@@ -373,7 +376,7 @@ try:
                          stderr=subprocess.PIPE, shell=True).wait()
 
     if installer == "Linux":
-        subprocess.Popen("/var/ossec/bin/ossec-control stop", stdout=subprocess.PIPE,
+        subprocess.Popen("service ossec stop", stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE, shell=True).wait()
 
     # make sure we modify the ossec.conf
@@ -403,4 +406,6 @@ try:
 except KeyboardInterrupt:
     print ("Sounds good.. Aborting Auto-OSSEC...")
     sys.exit()
-except Exception as error: print ("[*] Something did not complete. Does this system have Internet access?")
+except Exception as error: 
+    print ("[*] Something did not complete. Does this system have Internet access?")
+    print(traceback.print_exc(file=sys.stdout))
